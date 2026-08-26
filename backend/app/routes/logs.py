@@ -28,3 +28,6 @@ def create_service_log(log:ServiceLog, session: Session = Depends(get_session)):
     session.refresh(log)
     return log
 
+@router.get("/logs/{vehicle_id}/}", response_model=List[ServiceLog])
+def read_service_log(vehicle_id: int, session: Session = Depends(get_session)):
+    return session.exec(select(ServiceLog).where(ServiceLog.vehicle_id == vehicle_id)).all()
