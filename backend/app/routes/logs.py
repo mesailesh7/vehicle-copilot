@@ -12,3 +12,9 @@ def create_vehicle(vehicle: Vehicle, session: Session = Depends(get_session)):
     session.commit()
     session.refresh(vehicle)
     return vehicle
+
+@router.get("/vehicles/", response_model=List[Vehicle])
+def read_vehicles(session: Session = Depends(get_session)):
+    vehicles = session.exec(select(Vehicle)).all()
+    return vehicles
+
