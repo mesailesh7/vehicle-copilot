@@ -12,7 +12,7 @@ class Vehicle(SQLModel, table=True):
 
 class ServiceLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    vehicle_id: int = Field(foreign_key='Vehicle.id')
+    vehicle_id: int = Field(foreign_key='vehicle.id')
     service_date: date
     mileage_at_service: int
     category: str
