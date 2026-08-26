@@ -18,3 +18,13 @@ def read_vehicles(session: Session = Depends(get_session)):
     vehicles = session.exec(select(Vehicle)).all()
     return vehicles
 
+@router.post("/logs/", response_model=ServiceLog)
+def create_service_log(log:ServiceLog, session: Session = Depends(get_session)):
+    vehicle = session.get(Vehicle, log.vehicle_id)
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    session.add(log)
+    session.commit()
+    session.refresh(log)
+    return log
+
