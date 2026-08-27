@@ -37,7 +37,7 @@ def get_vector_store()->QdrantVectorStore:
     return QdrantVectorStore(
         client=qdrant_client,
         collection_name=settings.qdrant_collection_name,
-        embeddings=embeddings,
+        embedding=embeddings,
     )
 
 async def process_pdf_manual(file:UploadFile, vehicle_id:int) -> int:
@@ -67,7 +67,7 @@ async def process_pdf_manual(file:UploadFile, vehicle_id:int) -> int:
             doc.metadata["source_filename"] = file.filename
 
         vector_store = get_vector_store()
-        vector_store.add_document(split_docs)
+        vector_store.add_documents(split_docs)
 
         return len(split_docs)
 
