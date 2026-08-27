@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from typing import List
 from app.database import  get_session
-from app.models.vehicle import Vehicle, ServiceLog
+from app.models.vehicle import Vehicle, ServiceLog, ServiceLogCreate
 
 router = APIRouter(prefix="/api/v1", tags=["vehicles"])
 
@@ -18,16 +18,37 @@ def read_vehicles(session: Session = Depends(get_session)):
     vehicles = session.exec(select(Vehicle)).all()
     return vehicles
 
+# @router.post("/logs/", response_model=ServiceLog)
+# def create_service_log(
+#     log: ServiceLog,
+#     session: Session = Depends(get_session)
+# ):
+#     vehicle = session.get(Vehicle, log.vehicle_id)
+#     if not vehicle:
+#         raise HTTPException(
+#             status_code=404,
+#             detail="Vehicle not found"
+#         )
+#     session.add(log)
+#     session.commit()
+#     session.refresh(log)
+#     return log
+
 @router.post("/logs/", response_model=ServiceLog)
-def create_service_log(log:ServiceLog, session: Session = Depends(get_session)):
-    vehicle = session.get(Vehicle, log.vehicle_id)
-    if not vehicle:
-        raise HTTPException(status_code=404, detail="Vehicle not found")
+def create_service_log(
+    log_data: ServiceLogCreate,
+    session: Session = Depends(get_session)
+):
+
+    log = ServiceLog(**log_data.model_dump())
+    print(type(log.service_date))
+    print(log.service_date)
     session.add(log)
     session.commit()
     session.refresh(log)
+
     return log
 
-@router.get("/logs/{vehicle_id}/}", response_model=List[ServiceLog])
+@router.get("/logs/{vehicle_id}", response_model=List[ServiceLog])
 def read_service_log(vehicle_id: int, session: Session = Depends(get_session)):
     return session.exec(select(ServiceLog).where(ServiceLog.vehicle_id == vehicle_id)).all()
