@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db
-from app.routers import logs, documents
+from app.routers import logs, documents, copilot
 
 
 @asynccontextmanager
@@ -23,6 +23,7 @@ app.add_middleware(
 
 app.include_router(logs.router)
 app.include_router(documents.router)
+app.include_router(copilot.router)
 
 @app.get("/health")
 def health_check():
