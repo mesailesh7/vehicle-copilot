@@ -18,7 +18,7 @@ async def upload_manual(
     if not file.filename.endswith(".pdf"):
         raise HTTPException(
             status_code=400,
-            details="Only PDF files manuals are accepted",
+            detail="Only PDF files manuals are accepted",
         )
 
     vehicle = session.get(Vehicle, vehicle_id)

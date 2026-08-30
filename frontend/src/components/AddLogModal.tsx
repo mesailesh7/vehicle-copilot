@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { X, Calendar, Wrench, DollarSign, FileText, Layers, RefreshCw } from "lucide-react";
 import { ServiceLogCreate } from "../types";
+import { getServiceCategories, getCommonParts } from "../utils/api";
 
 interface AddLogModalProps {
   isOpen: boolean;
@@ -11,20 +12,24 @@ interface AddLogModalProps {
   onSubmit: (log: ServiceLogCreate) => Promise<void>;
 }
 
-const CATEGORIES = [
-  "Oil Change",
-  "Brakes",
-  "Diagnostics",
-  "Tires",
-  "Transmission",
-  "Engine",
-  "Battery",
-  "Suspension",
-  "Other",
-];
+const CATEGORY_LABELS: Record<string, string> = {
+  OIL_CHANGE: "Oil Change",
+  BRAKE_SERVICE: "Brakes / Brake Service",
+  TIRE_SERVICE: "Tires / Tire Service",
+  BATTERY: "Battery Service",
+  TRANSMISSION: "Transmission Service",
+  COOLANT: "Coolant Flush / Service",
+  SPARK_PLUGS: "Spark Plugs",
+  CABIN_AIR_FILTER: "Cabin Air Filter",
+  SUSPENSION: "Suspension",
+  DTC_DIAGNOSTIC: "DTC Diagnostic / Code Scanning",
+  GENERAL_INSPECTION: "General Inspection",
+  CUSTOM: "Other / Custom",
+};
 
 export default function AddLogModal({ isOpen, onClose, vehicleId, onSubmit }: AddLogModalProps) {
-  const [category, setCategory] = useState(CATEGORIES[0]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [category, setCategory] = useState("OIL_CHANGE");
   const [customCategory, setCustomCategory] = useState("");
   const [mileageAtService, setMileageAtService] = useState("");
   const [serviceDate, setServiceDate] = useState(
@@ -32,10 +37,63 @@ export default function AddLogModal({ isOpen, onClose, vehicleId, onSubmit }: Ad
   );
   const [description, setDescription] = useState("");
   const [partsReplaced, setPartsReplaced] = useState("");
+  const [partsSuggestions, setPartsSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [cost, setCost] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Fetch service categories from backend
+  useEffect(() => {
+    if (!isOpen) return;
+    getServiceCategories()
+      .then((data) => {
+        setCategories(data);
+        if (data.length > 0) {
+          setCategory(data[0]);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load categories from API, falling back:", err);
+        const fallback = [
+          "OIL_CHANGE",
+          "BRAKE_SERVICE",
+          "TIRE_SERVICE",
+          "BATTERY",
+          "TRANSMISSION",
+          "COOLANT",
+          "SPARK_PLUGS",
+          "CABIN_AIR_FILTER",
+          "SUSPENSION",
+          "DTC_DIAGNOSTIC",
+          "GENERAL_INSPECTION",
+          "CUSTOM",
+        ];
+        setCategories(fallback);
+        setCategory(fallback[0]);
+      });
+  }, [isOpen]);
+
+  // Debounced search for parts autocomplete
+  useEffect(() => {
+    if (!partsReplaced.trim()) {
+      setPartsSuggestions([]);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      getCommonParts(partsReplaced)
+        .then((suggestions) => {
+          setPartsSuggestions(suggestions);
+        })
+        .catch((err) => {
+          console.error("Failed to fetch autocomplete parts:", err);
+        });
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timer);
+  }, [partsReplaced]);
 
   if (!isOpen) return null;
 
@@ -53,13 +111,13 @@ export default function AddLogModal({ isOpen, onClose, vehicleId, onSubmit }: Ad
       return;
     }
 
-    const finalCategory = category === "Other" && customCategory.trim() ? customCategory.trim() : category;
+    const finalCategory = category === "CUSTOM" && customCategory.trim() ? customCategory.trim() : category;
 
     setLoading(true);
     try {
       await onSubmit({
         vehicle_id: vehicleId,
-        service_date: serviceDate ? new Date(serviceDate).toISOString() : undefined,
+        service_date: serviceDate ? new Date(serviceDate).toISOString().substring(0, 10) : undefined, // YYYY-MM-DD format
         mileage_at_service: Number(mileageAtService),
         category: finalCategory,
         description: description.trim(),
@@ -162,14 +220,14 @@ export default function AddLogModal({ isOpen, onClose, vehicleId, onSubmit }: Ad
                     onChange={(e) => setCategory(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-sm text-slate-200 focus:outline-none focus:border-cyan-500 transition"
                   >
-                    {CATEGORIES.map((cat) => (
+                    {categories.map((cat) => (
                       <option key={cat} value={cat}>
-                        {cat}
+                        {CATEGORY_LABELS[cat] || cat}
                       </option>
                     ))}
                   </select>
 
-                  {category === "Other" && (
+                  {category === "CUSTOM" && (
                     <input
                       type="text"
                       required
@@ -197,8 +255,8 @@ export default function AddLogModal({ isOpen, onClose, vehicleId, onSubmit }: Ad
                   />
                 </div>
 
-                {/* Parts Replaced */}
-                <div>
+                {/* Parts Replaced with Autocomplete */}
+                <div className="relative">
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                     Parts Replaced
                   </label>
@@ -206,9 +264,35 @@ export default function AddLogModal({ isOpen, onClose, vehicleId, onSubmit }: Ad
                     type="text"
                     placeholder="e.g. Fram CH11955 Oil Filter, Mobil1 0W-20"
                     value={partsReplaced}
-                    onChange={(e) => setPartsReplaced(e.target.value)}
+                    onChange={(e) => {
+                      setPartsReplaced(e.target.value);
+                      setShowSuggestions(true);
+                    }}
+                    onFocus={() => setShowSuggestions(true)}
+                    onBlur={() => {
+                      // Delay closing to allow clicks to register
+                      setTimeout(() => setShowSuggestions(false), 200);
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition"
                   />
+                  {showSuggestions && partsSuggestions.length > 0 && (
+                    <div className="absolute left-0 right-0 mt-1 bg-slate-950 border border-slate-800 rounded-lg shadow-xl max-h-48 overflow-y-auto z-20">
+                      {partsSuggestions.map((suggestion, index) => (
+                        <button
+                          key={index}
+                          type="button"
+                          onClick={() => {
+                            setPartsReplaced(suggestion);
+                            setPartsSuggestions([]);
+                            setShowSuggestions(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs text-slate-350 hover:text-cyan-400 hover:bg-slate-900 transition"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Cost */}

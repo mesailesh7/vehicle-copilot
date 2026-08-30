@@ -105,3 +105,19 @@ export function uploadManual(
     xhr.send(formData);
   });
 }
+
+export async function getServiceCategories(): Promise<string[]> {
+  const response = await fetch(`${API_BASE_URL}/service-categories/`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch service categories: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+export async function getCommonParts(query: string): Promise<string[]> {
+  const response = await fetch(`${API_BASE_URL}/common-parts/?q=${encodeURIComponent(query)}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch common parts: ${response.statusText}`);
+  }
+  return response.json();
+}

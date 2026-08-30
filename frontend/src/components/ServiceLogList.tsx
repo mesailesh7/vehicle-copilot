@@ -17,27 +17,61 @@ export default function ServiceLogList({ logs, onOpenAddModal, isLoading }: Serv
   // Get unique categories for filter
   const categories = ["All", ...Array.from(new Set(logs.map((log) => log.category)))];
 
-  const getCategoryBadgeStyle = (category: string) => {
-    switch (category.toLowerCase()) {
-      case "oil change":
-        return "text-amber-400 bg-amber-400/10 border-amber-400/25";
-      case "brakes":
-        return "text-red-400 bg-red-400/10 border-red-400/25";
-      case "diagnostics":
-        return "text-purple-400 bg-purple-400/10 border-purple-400/25";
-      case "tires":
-        return "text-emerald-400 bg-emerald-400/10 border-emerald-400/25";
-      case "transmission":
-        return "text-blue-400 bg-blue-400/10 border-blue-400/25";
-      case "engine":
-        return "text-orange-400 bg-orange-400/10 border-orange-400/25";
-      case "battery":
-        return "text-pink-400 bg-pink-400/10 border-pink-400/25";
-      case "suspension":
-        return "text-indigo-400 bg-indigo-400/10 border-indigo-400/25";
-      default:
-        return "text-slate-400 bg-slate-400/10 border-slate-400/25";
+  const formatCategory = (category: string) => {
+    if (category === "All") return "All Categories";
+    switch (category) {
+      case "OIL_CHANGE": return "Oil Change";
+      case "BRAKE_SERVICE": return "Brake Service";
+      case "TIRE_SERVICE": return "Tire Service";
+      case "BATTERY": return "Battery";
+      case "TRANSMISSION": return "Transmission";
+      case "COOLANT": return "Coolant";
+      case "SPARK_PLUGS": return "Spark Plugs";
+      case "CABIN_AIR_FILTER": return "Cabin Air Filter";
+      case "SUSPENSION": return "Suspension";
+      case "DTC_DIAGNOSTIC": return "Diagnostics";
+      case "GENERAL_INSPECTION": return "General Inspection";
+      case "CUSTOM": return "Custom";
+      default: return category.replace(/_/g, " ");
     }
+  };
+
+  const getCategoryBadgeStyle = (category: string) => {
+    const cat = category.toLowerCase();
+    if (cat === "oil change" || cat === "oil_change") {
+      return "text-amber-400 bg-amber-400/10 border-amber-400/25";
+    }
+    if (cat === "brakes" || cat === "brake_service") {
+      return "text-red-400 bg-red-400/10 border-red-400/25";
+    }
+    if (cat === "diagnostics" || cat === "dtc_diagnostic") {
+      return "text-purple-400 bg-purple-400/10 border-purple-400/25";
+    }
+    if (cat === "tires" || cat === "tire_service") {
+      return "text-emerald-400 bg-emerald-400/10 border-emerald-400/25";
+    }
+    if (cat === "transmission") {
+      return "text-blue-400 bg-blue-400/10 border-blue-400/25";
+    }
+    if (cat === "coolant") {
+      return "text-cyan-400 bg-cyan-400/10 border-cyan-400/25";
+    }
+    if (cat === "spark_plugs" || cat === "spark plugs") {
+      return "text-teal-400 bg-teal-400/10 border-teal-400/25";
+    }
+    if (cat === "cabin_air_filter" || cat === "cabin air filter") {
+      return "text-violet-400 bg-violet-400/10 border-violet-400/25";
+    }
+    if (cat === "battery") {
+      return "text-pink-400 bg-pink-400/10 border-pink-400/25";
+    }
+    if (cat === "suspension") {
+      return "text-indigo-400 bg-indigo-400/10 border-indigo-400/25";
+    }
+    if (cat === "general_inspection" || cat === "general inspection") {
+      return "text-sky-400 bg-sky-400/10 border-sky-400/25";
+    }
+    return "text-slate-400 bg-slate-400/10 border-slate-400/25";
   };
 
   const formatDate = (dateStr: string) => {
@@ -115,7 +149,7 @@ export default function ServiceLogList({ logs, onOpenAddModal, isLoading }: Serv
             >
               {categories.map((cat) => (
                 <option key={cat} value={cat}>
-                  {cat}
+                  {formatCategory(cat)}
                 </option>
               ))}
             </select>
@@ -177,7 +211,7 @@ export default function ServiceLogList({ logs, onOpenAddModal, isLoading }: Serv
                     log.category
                   )}`}
                 >
-                  {log.category}
+                  {formatCategory(log.category)}
                 </span>
               </div>
 

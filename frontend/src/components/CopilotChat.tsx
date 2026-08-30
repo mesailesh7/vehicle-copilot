@@ -11,9 +11,10 @@ interface CopilotChatProps {
 }
 
 const QUICK_ACTIONS = [
-  "What oil weight does my engine take?",
-  "When was my last oil change?",
-  "What is the spark plug torque spec?",
+  "Torque specs for drain plug & wheels",
+  "Fluid capacities & oil viscosity",
+  "When was the last brake replacement?",
+  "DTC troubleshooting steps",
 ];
 
 export default function CopilotChat({ vehicleId }: CopilotChatProps) {
