@@ -2,11 +2,16 @@
 
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { UserProfile, UserRole } from "../types";
+import { API_BASE_URL } from "../utils/api";
 
-interface UserProfile {
-  id: number;
+interface SignupParams {
   username: string;
-  role: "technician" | "service_advisor" | "owner";
+  password: string;
+  role?: UserRole;
+  shopName?: string;
+  planTier?: string;
+  inviteCode?: string;
 }
 
 interface AuthContextType {
@@ -15,9 +20,10 @@ interface AuthContextType {
   isAuthenticated: boolean;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  signup: (username: string, password: string, role: string) => Promise<void>;
+  signup: (params: SignupParams) => Promise<void>;
   logout: () => void;
-  setRoleDemo: (role: "technician" | "service_advisor" | "owner") => void;
+  setRoleDemo: (role: UserRole) => void;
+  refreshUserProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -45,8 +51,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
+  const fetchCurrentUser = async (jwtToken: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/me`, {
+        headers: { Authorization: `Bearer ${jwtToken}` },
+      });
+      if (res.ok) {
+        const userData = await res.json();
+        setUser(userData);
+      }
+    } catch (err) {
+      console.error("Failed to load user profile:", err);
+    }
+  };
+
   useEffect(() => {
-    // Load token from localStorage on mount
     const savedToken = localStorage.getItem("auth_token");
     if (savedToken) {
       const decoded = parseJwt(savedToken);
@@ -55,8 +74,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser({
           id: Number(decoded.sub),
           username: decoded.username,
-          role: decoded.role,
+          role: decoded.role as UserRole,
+          tenant_id: decoded.tenant_id,
+          tenant_name: decoded.tenant_name,
+          tenant_slug: decoded.tenant_slug,
+          tenant_plan: decoded.plan_tier,
         });
+        // Background sync full profile
+        fetchCurrentUser(savedToken);
       } else {
         localStorage.removeItem("auth_token");
       }
@@ -65,7 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = async (username: string, password: string) => {
-    const response = await fetch("http://localhost:8000/api/v1/auth/login", {
+    const response = await fetch(`${API_BASE_URL}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
@@ -73,7 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({ detail: "Login failed" }));
-      throw new Error(err.detail || "Login failed");
+      throw new Error(err.detail || "Incorrect username or password");
     }
 
     const data = await response.json();
@@ -83,16 +108,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push("/");
   };
 
-  const signup = async (username: string, password: string, role: string) => {
-    const response = await fetch("http://localhost:8000/api/v1/auth/signup", {
+  const signup = async (params: SignupParams) => {
+    const payload: Record<string, any> = {
+      username: params.username,
+      password: params.password,
+    };
+
+    if (params.shopName) {
+      payload.shop_name = params.shopName;
+      payload.plan_tier = params.planTier || "starter";
+      payload.role = "owner";
+    } else if (params.inviteCode) {
+      payload.invite_code = params.inviteCode;
+    } else {
+      payload.role = params.role || "technician";
+    }
+
+    const response = await fetch(`${API_BASE_URL}/auth/signup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, role }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({ detail: "Signup failed" }));
-      throw new Error(err.detail || "Signup failed");
+      const err = await response.json().catch(() => ({ detail: "Registration failed" }));
+      throw new Error(err.detail || "Registration failed");
     }
   };
 
@@ -103,9 +143,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push("/login");
   };
 
-  const setRoleDemo = (role: "technician" | "service_advisor" | "owner") => {
+  const setRoleDemo = (role: UserRole) => {
     if (user) {
       setUser({ ...user, role });
+    }
+  };
+
+  const refreshUserProfile = async () => {
+    if (token) {
+      await fetchCurrentUser(token);
     }
   };
 
@@ -118,6 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signup,
     logout,
     setRoleDemo,
+    refreshUserProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

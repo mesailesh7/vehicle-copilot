@@ -15,11 +15,11 @@ import {
   LogOut,
   Activity,
   BookOpen,
-  Settings,
-  DollarSign,
+  CreditCard,
   Users,
   Lock,
-  Plus
+  Building2,
+  ChevronRight,
 } from "lucide-react";
 import { Vehicle, VehicleCreate, ServiceLog, ServiceLogCreate } from "../types";
 import { getVehicles, createVehicle, getLogs, createLog } from "../utils/api";
@@ -31,8 +31,11 @@ import ManualUploader from "../components/ManualUploader";
 import DtcScanner from "../components/DtcScanner";
 import KnowledgeBase from "../components/KnowledgeBase";
 import RoleSwitcher from "../components/RoleSwitcher";
+import BillingDashboard from "../components/BillingDashboard";
+import TeamManagement from "../components/TeamManagement";
+import PlanQuotaModal from "../components/PlanQuotaModal";
 
-type TabType = "chat" | "diagnostics" | "history" | "knowledge-base" | "uploader" | "management";
+type TabType = "chat" | "diagnostics" | "history" | "knowledge-base" | "uploader" | "team" | "billing";
 
 export default function Dashboard() {
   const { isAuthenticated, user, loading: authLoading, logout } = useAuth();
@@ -49,8 +52,9 @@ export default function Dashboard() {
   const [apiError, setApiError] = useState("");
   const [isAddLogOpen, setIsAddLogOpen] = useState(false);
 
-  // Billing seats state for Owner view
-  const [allocatedSeats, setAllocatedSeats] = useState(4);
+  // Quota upgrade modal
+  const [isQuotaModalOpen, setIsQuotaModalOpen] = useState(false);
+  const [quotaModalMessage, setQuotaModalMessage] = useState("");
 
   // Redirect to login if unauthenticated
   useEffect(() => {
@@ -59,7 +63,7 @@ export default function Dashboard() {
     }
   }, [isAuthenticated, authLoading, router]);
 
-  // Fetch Vehicles on mount
+  // Fetch Vehicles on mount or auth change
   useEffect(() => {
     if (isAuthenticated) {
       fetchVehiclesData();
@@ -85,6 +89,8 @@ export default function Dashboard() {
         const savedId = localStorage.getItem("selectedVehicleId");
         const exists = savedId && data.some((v) => v.id === Number(savedId));
         setSelectedVehicleId(exists ? Number(savedId) : data[0].id);
+      } else {
+        setSelectedVehicleId(null);
       }
     } catch (err: any) {
       setApiError("Could not connect to FastAPI server. Ensure it is running at http://localhost:8000");
@@ -117,7 +123,12 @@ export default function Dashboard() {
       setSelectedVehicleId(created.id);
       localStorage.setItem("selectedVehicleId", created.id.toString());
     } catch (err: any) {
-      throw new Error(err.message || "Failed to add new vehicle.");
+      const errorMsg = err.message || "Failed to add new vehicle.";
+      if (errorMsg.toLowerCase().includes("limit") || errorMsg.toLowerCase().includes("upgrade")) {
+        setQuotaModalMessage(errorMsg);
+        setIsQuotaModalOpen(true);
+      }
+      throw new Error(errorMsg);
     }
   };
 
@@ -125,7 +136,7 @@ export default function Dashboard() {
     try {
       const created = await createLog(newLog);
       setLogs((prev) => [created, ...prev]);
-      
+
       if (selectedVehicleId) {
         setVehicles((prevVehicles) =>
           prevVehicles.map((v) => {
@@ -155,37 +166,57 @@ export default function Dashboard() {
     );
   }
 
-  // Helper check for role restrictions
+  // Role permissions helpers
   const isServiceAdvisor = user.role === "service_advisor";
   const isOwner = user.role === "owner";
+  const isAdmin = user.role === "admin";
+  const isManager = user.role === "manager";
+
+  const canManageTeam = isOwner || isAdmin || isManager;
+  const canManageBilling = isOwner || isAdmin;
+  const canAccessDiagnostics = !isServiceAdvisor;
+  const canAccessUploader = !isServiceAdvisor;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
       
       {/* Header bar */}
-      <header className="border-b border-slate-900 bg-slate-950/80 backdrop-blur-md sticky top-0 z-30 px-4 py-4 md:px-8 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <header className="border-b border-slate-900 bg-slate-950/80 backdrop-blur-md sticky top-0 z-30 px-4 py-3.5 md:px-8 flex items-center justify-between">
+        <div className="flex items-center gap-3">
           <div className="bg-gradient-to-br from-cyan-400 to-blue-600 p-2 rounded-xl text-slate-950 shadow-lg shadow-cyan-500/10">
             <Car className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-base md:text-lg font-black tracking-tight text-white flex items-center gap-1.5">
-              VEHICLE<span className="text-cyan-400 bg-cyan-950/40 border border-cyan-800/40 px-1.5 py-0.5 rounded text-xs font-mono">COPILOT</span>
-            </h1>
-            <p className="text-[10px] text-slate-400 font-medium">Predictive Fleet Diagnostics & AI Ingestion</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base md:text-lg font-black tracking-tight text-white flex items-center gap-1.5">
+                VEHICLE<span className="text-cyan-400 bg-cyan-950/40 border border-cyan-800/40 px-1.5 py-0.5 rounded text-xs font-mono">COPILOT</span>
+              </h1>
+              
+              {/* Tenant Workshop Badge */}
+              {user.tenant_name && (
+                <div className="hidden sm:flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2.5 py-0.5 rounded-full text-xs font-medium text-slate-300">
+                  <Building2 className="w-3 h-3 text-cyan-400" />
+                  <span className="font-bold text-white">{user.tenant_name}</span>
+                  <span className="text-[10px] uppercase font-mono font-bold text-cyan-400 bg-cyan-950/60 px-1.5 py-0.2 rounded border border-cyan-800/40">
+                    {user.tenant_plan || "PRO"}
+                  </span>
+                </div>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-400 font-medium">Multi-Tenant Diagnostic & Workshop Intelligence</p>
           </div>
         </div>
 
         {/* Demo switcher and auth trigger controls */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <RoleSwitcher />
           
           <button
             onClick={logout}
-            className="flex items-center gap-1 bg-slate-900 hover:bg-slate-800 border border-slate-850 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition"
+            className="flex items-center gap-1 bg-slate-900 hover:bg-slate-850 border border-slate-800 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition"
           >
             <LogOut className="w-3.5 h-3.5" />
-            <span>Sign Out</span>
+            <span className="hidden sm:inline">Sign Out</span>
           </button>
         </div>
       </header>
@@ -204,7 +235,7 @@ export default function Dashboard() {
               {/* AI Copilot */}
               <button
                 onClick={() => setActiveTab("chat")}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-bold transition ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition ${
                   activeTab === "chat" ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/10" : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"
                 }`}
               >
@@ -215,11 +246,11 @@ export default function Dashboard() {
               {/* DTC Scanner */}
               <button
                 onClick={() => {
-                  if (!isServiceAdvisor) setActiveTab("diagnostics");
+                  if (canAccessDiagnostics) setActiveTab("diagnostics");
                 }}
-                disabled={isServiceAdvisor}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-bold transition ${
-                  isServiceAdvisor ? "opacity-35 cursor-not-allowed" : ""
+                disabled={!canAccessDiagnostics}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition ${
+                  !canAccessDiagnostics ? "opacity-35 cursor-not-allowed" : ""
                 } ${
                   activeTab === "diagnostics" ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/10" : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"
                 }`}
@@ -228,13 +259,13 @@ export default function Dashboard() {
                   <Activity className="w-4 h-4" />
                   <span>DTC OBD-II Scanner</span>
                 </div>
-                {isServiceAdvisor && <Lock className="w-3.5 h-3.5 text-slate-550" />}
+                {!canAccessDiagnostics && <Lock className="w-3.5 h-3.5 text-slate-500" />}
               </button>
 
               {/* Service Logs */}
               <button
                 onClick={() => setActiveTab("history")}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-bold transition ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition ${
                   activeTab === "history" ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/10" : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"
                 }`}
               >
@@ -245,7 +276,7 @@ export default function Dashboard() {
               {/* Shop Knowledge Base */}
               <button
                 onClick={() => setActiveTab("knowledge-base")}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-bold transition ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition ${
                   activeTab === "knowledge-base" ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/10" : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"
                 }`}
               >
@@ -253,14 +284,14 @@ export default function Dashboard() {
                 <span>Shop Knowledge Base</span>
               </button>
 
-              {/* Owner's Manuals PDF */}
+              {/* Document Indexer */}
               <button
                 onClick={() => {
-                  if (!isServiceAdvisor) setActiveTab("uploader");
+                  if (canAccessUploader) setActiveTab("uploader");
                 }}
-                disabled={isServiceAdvisor}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-bold transition ${
-                  isServiceAdvisor ? "opacity-35 cursor-not-allowed" : ""
+                disabled={!canAccessUploader}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition ${
+                  !canAccessUploader ? "opacity-35 cursor-not-allowed" : ""
                 } ${
                   activeTab === "uploader" ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/10" : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"
                 }`}
@@ -269,35 +300,54 @@ export default function Dashboard() {
                   <UploadCloud className="w-4 h-4" />
                   <span>Document Indexer</span>
                 </div>
-                {isServiceAdvisor && <Lock className="w-3.5 h-3.5 text-slate-550" />}
+                {!canAccessUploader && <Lock className="w-3.5 h-3.5 text-slate-500" />}
               </button>
 
-              {/* Shop Management (Owner Only) */}
+              {/* Team & Staff (Managers, Admins, Owners) */}
               <button
                 onClick={() => {
-                  if (isOwner) setActiveTab("management");
+                  if (canManageTeam) setActiveTab("team");
                 }}
-                disabled={!isOwner}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-bold transition ${
-                  !isOwner ? "opacity-35 cursor-not-allowed" : ""
+                disabled={!canManageTeam}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition ${
+                  !canManageTeam ? "opacity-35 cursor-not-allowed" : ""
                 } ${
-                  activeTab === "management" ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/10" : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"
+                  activeTab === "team" ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/10" : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"
                 }`}
               >
                 <div className="flex items-center gap-2.5">
-                  <Settings className="w-4 h-4" />
-                  <span>Shop Management</span>
+                  <Users className="w-4 h-4" />
+                  <span>Team & Staff</span>
                 </div>
-                {!isOwner && <Lock className="w-3.5 h-3.5 text-slate-550" />}
+                {!canManageTeam && <Lock className="w-3.5 h-3.5 text-slate-500" />}
+              </button>
+
+              {/* Stripe Billing & Subscriptions (Owners & Admins) */}
+              <button
+                onClick={() => {
+                  if (canManageBilling) setActiveTab("billing");
+                }}
+                disabled={!canManageBilling}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition ${
+                  !canManageBilling ? "opacity-35 cursor-not-allowed" : ""
+                } ${
+                  activeTab === "billing" ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/10" : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <CreditCard className="w-4 h-4" />
+                  <span>Billing & Stripe</span>
+                </div>
+                {!canManageBilling && <Lock className="w-3.5 h-3.5 text-slate-500" />}
               </button>
             </nav>
           </div>
 
           {/* User profile identifier */}
           <div className="border-t border-slate-850 pt-4 px-2 space-y-1">
-            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Logged user</span>
+            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Logged User</span>
             <p className="text-xs font-bold text-white truncate">{user.username}</p>
-            <span className="text-[10px] text-cyan-400 font-mono capitalize">{user.role}</span>
+            <span className="text-[10px] text-cyan-400 font-mono capitalize block">{user.role}</span>
           </div>
         </aside>
 
@@ -308,227 +358,167 @@ export default function Dashboard() {
             <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl p-4 flex gap-3 items-center">
               <AlertTriangle className="w-5 h-5 shrink-0" />
               <div className="text-xs md:text-sm">
-                <span className="font-bold">Offline Connection Alert:</span> {apiError}
+                <span className="font-bold">Connection Alert:</span> {apiError}
               </div>
               <button 
                 onClick={fetchVehiclesData} 
                 className="ml-auto bg-slate-900 hover:bg-slate-850 text-xs font-bold text-slate-350 px-3 py-1.5 border border-slate-800 rounded-lg transition"
               >
-                Retry Connection
+                Retry
               </button>
             </div>
           )}
 
-          {/* Vehicle Context Switcher */}
-          <VehicleSelector
-            vehicles={vehicles}
-            selectedVehicleId={selectedVehicleId}
-            onSelectVehicle={handleSelectVehicle}
-            onAddVehicle={handleAddVehicle}
-          />
-
-          {loadingVehicles ? (
-            <div className="flex-1 flex items-center justify-center p-12">
-              <div className="flex flex-col items-center gap-3">
-                <div className="animate-spin rounded-full h-8 w-8 border-4 border-t-cyan-500 border-r-slate-900 border-b-slate-900 border-l-slate-900" />
-                <p className="text-xs text-slate-400">Verifying telemetry links...</p>
-              </div>
-            </div>
-          ) : vehicles.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center border border-slate-850 bg-slate-900/20 rounded-2xl p-8 max-w-lg mx-auto text-center my-10">
-              <div className="bg-cyan-500/10 border border-cyan-500/20 p-5 rounded-full text-cyan-400 mb-5">
-                <Car className="w-10 h-10" />
-              </div>
-              <h2 className="text-lg font-bold text-white">Create Your Vehicle Workspace</h2>
-              <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                Before we can build your maintenance records or boot the AI diagnostic copilot, please define your active vehicle profile.
-              </p>
-              <div className="mt-6">
-                <span className="text-xs text-slate-500">Add a vehicle in the selector header above to get started.</span>
-              </div>
-            </div>
-          ) : selectedVehicleId === null ? (
-            <div className="flex-1 flex items-center justify-center">
-              <p className="text-xs text-slate-400">Please select an active vehicle to initialize workspace panels.</p>
-            </div>
-          ) : (
-            <div className="flex-1 flex flex-col overflow-hidden gap-5">
-              
-              {/* Quick stats ribbon */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="bg-slate-900/60 border border-slate-850 p-3 rounded-lg flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Service Events</p>
-                    <p className="text-lg font-bold text-white font-mono mt-0.5">{logs.length}</p>
-                  </div>
-                  <Wrench className="w-4 h-4 text-cyan-500/60" />
-                </div>
-                <div className="bg-slate-900/60 border border-slate-850 p-3 rounded-lg flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Investment</p>
-                    <p className="text-lg font-bold text-emerald-400 font-mono mt-0.5">
-                      {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(totalCost)}
-                    </p>
-                  </div>
-                  <span className="text-emerald-500/60 font-bold text-xs">$</span>
-                </div>
-                <div className="bg-slate-900/60 border border-slate-850 p-3 rounded-lg flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Current Odometer</p>
-                    <p className="text-lg font-bold text-white font-mono mt-0.5">
-                      {(vehicles.find((v) => v.id === selectedVehicleId)?.current_mileage || 0).toLocaleString()} mi
-                    </p>
-                  </div>
-                  <Layers className="w-4 h-4 text-indigo-500/60" />
-                </div>
-                <div className="bg-slate-900/60 border border-slate-850 p-3 rounded-lg flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Copilot AI Diagnostics</p>
-                    <p className="text-lg font-bold text-cyan-400 font-mono mt-0.5">Active</p>
-                  </div>
-                  <Cpu className="w-4 h-4 text-cyan-500/60" />
-                </div>
-              </div>
-
-              {/* View routing based on Sidebar active tab */}
-              <div className="flex-1 min-h-[400px] overflow-hidden">
-                {activeTab === "chat" && (
-                  <div className="h-full overflow-hidden">
-                    <CopilotChat vehicleId={selectedVehicleId} />
-                  </div>
-                )}
-
-                {activeTab === "diagnostics" && !isServiceAdvisor && (
-                  <div className="h-full overflow-hidden">
-                    <DtcScanner vehicle={activeVehicle!} />
-                  </div>
-                )}
-
-                {activeTab === "history" && (
-                  <div className="h-full overflow-hidden">
-                    <ServiceLogList
-                      logs={logs}
-                      onOpenAddModal={() => setIsAddLogOpen(true)}
-                      isLoading={loadingLogs}
-                    />
-                  </div>
-                )}
-
-                {activeTab === "knowledge-base" && (
-                  <div className="h-full overflow-hidden">
-                    <KnowledgeBase />
-                  </div>
-                )}
-
-                {activeTab === "uploader" && !isServiceAdvisor && (
-                  <div className="space-y-4 overflow-y-auto h-full pr-1 custom-scrollbar">
-                    <ManualUploader vehicleId={selectedVehicleId} />
-                    <div className="bg-slate-900 border border-slate-850 p-4 rounded-xl space-y-3">
-                      <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                        <ShieldAlert className="w-4 h-4 text-cyan-500" />
-                        Automotive Knowledge Loading
-                      </h4>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        To enable deep technical queries, upload your vehicle's factory manual (PDF) here. The PDF loader will parse and partition the documents, generate embeddings using text-embedding-3-small, and push them to the local Qdrant collection index.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === "management" && isOwner && (
-                  <div className="space-y-6 overflow-y-auto h-full pr-1 custom-scrollbar">
-                    
-                    {/* Metrics row */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {/* Subscription Status */}
-                      <div className="bg-slate-900 border border-slate-850 p-4 rounded-xl space-y-2">
-                        <h4 className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">Subscription Status</h4>
-                        <div className="flex items-center justify-between">
-                          <p className="text-base font-bold text-white">Workshop Premium Plan</p>
-                          <span className="text-[10px] font-bold text-emerald-450 bg-emerald-950/40 border border-emerald-800/40 px-2 py-0.5 rounded-full">
-                            Active
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-500">Renews on September 15, 2026</p>
-                      </div>
-
-                      {/* Allocated seats */}
-                      <div className="bg-slate-900 border border-slate-850 p-4 rounded-xl space-y-2">
-                        <h4 className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">Billed Active Seats</h4>
-                        <div className="flex items-center justify-between">
-                          <p className="text-base font-bold text-white">{allocatedSeats} / 10 seats</p>
-                          <button
-                            onClick={() => setAllocatedSeats((s) => Math.min(s + 1, 10))}
-                            className="bg-slate-850 hover:bg-slate-800 border border-slate-800 text-cyan-400 hover:text-cyan-300 p-1.5 rounded transition"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        <p className="text-[11px] text-slate-500">Charges will automatically scale on billing cycle.</p>
-                      </div>
-
-                      {/* Estimated Billing amount */}
-                      <div className="bg-slate-900 border border-slate-850 p-4 rounded-xl space-y-2">
-                        <h4 className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">Monthly SaaS Total</h4>
-                        <div className="flex items-center justify-between">
-                          <p className="text-base font-bold text-emerald-400 font-mono">
-                            ${(allocatedSeats * 29).toFixed(2)}
-                          </p>
-                          <span className="text-[10px] text-slate-500 font-bold">$29.00 / seat</span>
-                        </div>
-                        <p className="text-[11px] text-slate-500">Next invoice amount including active seats.</p>
-                      </div>
-                    </div>
-
-                    {/* Shop settings card */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-                      <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                        <Settings className="w-4 h-4 text-cyan-400" />
-                        Workshop & Seat Billing Settings
-                      </h3>
-                      <p className="text-xs text-slate-400 leading-relaxed">
-                        Manage active staff members, invite technicians or advisors to access fleet diagnostic tools, and adjust diagnostic severity warning thresholds.
-                      </p>
-                      <div className="border-t border-slate-850 pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <span className="text-[10px] text-slate-550 font-bold uppercase tracking-wider block">Invite Staff Member</span>
-                          <div className="flex gap-2">
-                            <input
-                              type="email"
-                              placeholder="colleague@workshop.com"
-                              className="flex-1 bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-xs text-slate-200 placeholder-slate-650 focus:outline-none focus:border-cyan-500"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setAllocatedSeats((s) => Math.min(s + 1, 10))}
-                              className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold py-2 px-3 rounded-lg transition"
-                            >
-                              Send Invite
-                            </button>
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <span className="text-[10px] text-slate-550 font-bold uppercase tracking-wider block font-mono">Current Shop Plan</span>
-                          <div className="flex items-center justify-between text-xs text-slate-350 p-2 bg-slate-950 border border-slate-850 rounded">
-                            <span>SaaS Core Diagnostics</span>
-                            <span className="font-bold text-white">4 Active Users</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Log creation modal sheet */}
-              <AddLogModal
-                isOpen={isAddLogOpen}
-                onClose={() => setIsAddLogOpen(false)}
-                vehicleId={selectedVehicleId}
-                onSubmit={handleAddLog}
-              />
+          {/* View: Team Management */}
+          {activeTab === "team" && canManageTeam && (
+            <div className="flex-1 overflow-hidden">
+              <TeamManagement />
             </div>
           )}
+
+          {/* View: Billing & Stripe */}
+          {activeTab === "billing" && canManageBilling && (
+            <div className="flex-1 overflow-hidden">
+              <BillingDashboard />
+            </div>
+          )}
+
+          {/* Views requiring vehicle workspace context */}
+          {activeTab !== "team" && activeTab !== "billing" && (
+            <>
+              {/* Vehicle Context Switcher */}
+              <VehicleSelector
+                vehicles={vehicles}
+                selectedVehicleId={selectedVehicleId}
+                onSelectVehicle={handleSelectVehicle}
+                onAddVehicle={handleAddVehicle}
+              />
+
+              {loadingVehicles ? (
+                <div className="flex-1 flex items-center justify-center p-12">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="animate-spin rounded-full h-8 w-8 border-4 border-t-cyan-500 border-r-slate-900 border-b-slate-900 border-l-slate-900" />
+                    <p className="text-xs text-slate-400">Loading workshop vehicles...</p>
+                  </div>
+                </div>
+              ) : vehicles.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center border border-slate-850 bg-slate-900/20 rounded-3xl p-8 max-w-lg mx-auto text-center my-10">
+                  <div className="bg-cyan-500/10 border border-cyan-500/20 p-5 rounded-full text-cyan-400 mb-5">
+                    <Car className="w-10 h-10" />
+                  </div>
+                  <h2 className="text-lg font-bold text-white">Create Your Vehicle Workspace</h2>
+                  <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                    Before we can build maintenance records or boot the AI diagnostic copilot, please define your active vehicle profile in the selector header above.
+                  </p>
+                </div>
+              ) : selectedVehicleId === null ? (
+                <div className="flex-1 flex items-center justify-center">
+                  <p className="text-xs text-slate-400">Please select an active vehicle to initialize workspace panels.</p>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col overflow-hidden gap-5">
+                  
+                  {/* Quick stats ribbon */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div className="bg-slate-900/60 border border-slate-850 p-3 rounded-xl flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Service Events</p>
+                        <p className="text-lg font-bold text-white font-mono mt-0.5">{logs.length}</p>
+                      </div>
+                      <Wrench className="w-4 h-4 text-cyan-500/60" />
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-850 p-3 rounded-xl flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Investment</p>
+                        <p className="text-lg font-bold text-emerald-400 font-mono mt-0.5">
+                          {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(totalCost)}
+                        </p>
+                      </div>
+                      <span className="text-emerald-500/60 font-bold text-xs">$</span>
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-850 p-3 rounded-xl flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Current Odometer</p>
+                        <p className="text-lg font-bold text-white font-mono mt-0.5">
+                          {(vehicles.find((v) => v.id === selectedVehicleId)?.current_mileage || 0).toLocaleString()} mi
+                        </p>
+                      </div>
+                      <Layers className="w-4 h-4 text-indigo-500/60" />
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-850 p-3 rounded-xl flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Copilot AI RAG</p>
+                        <p className="text-lg font-bold text-cyan-400 font-mono mt-0.5">Active</p>
+                      </div>
+                      <Cpu className="w-4 h-4 text-cyan-500/60" />
+                    </div>
+                  </div>
+
+                  {/* View routing based on Sidebar active tab */}
+                  <div className="flex-1 min-h-[400px] overflow-hidden">
+                    {activeTab === "chat" && (
+                      <div className="h-full overflow-hidden">
+                        <CopilotChat vehicleId={selectedVehicleId} />
+                      </div>
+                    )}
+
+                    {activeTab === "diagnostics" && canAccessDiagnostics && (
+                      <div className="h-full overflow-hidden">
+                        <DtcScanner vehicle={activeVehicle!} />
+                      </div>
+                    )}
+
+                    {activeTab === "history" && (
+                      <div className="h-full overflow-hidden">
+                        <ServiceLogList
+                          logs={logs}
+                          onOpenAddModal={() => setIsAddLogOpen(true)}
+                          isLoading={loadingLogs}
+                        />
+                      </div>
+                    )}
+
+                    {activeTab === "knowledge-base" && (
+                      <div className="h-full overflow-hidden">
+                        <KnowledgeBase />
+                      </div>
+                    )}
+
+                    {activeTab === "uploader" && canAccessUploader && (
+                      <div className="space-y-4 overflow-y-auto h-full pr-1 custom-scrollbar">
+                        <ManualUploader vehicleId={selectedVehicleId} />
+                        <div className="bg-slate-900 border border-slate-850 p-4 rounded-xl space-y-3">
+                          <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                            <ShieldAlert className="w-4 h-4 text-cyan-500" />
+                            Multi-Tenant Vector Ingestion
+                          </h4>
+                          <p className="text-[11px] text-slate-400 leading-relaxed">
+                            Upload factory service manuals (PDF) to build deep vehicle-specific AI retrieval for your workshop. Embeddings are partition-scoped to your workshop tenant.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Log creation modal sheet */}
+                  <AddLogModal
+                    isOpen={isAddLogOpen}
+                    onClose={() => setIsAddLogOpen(false)}
+                    vehicleId={selectedVehicleId}
+                    onSubmit={handleAddLog}
+                  />
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Quota Upgrade Modal */}
+          <PlanQuotaModal
+            isOpen={isQuotaModalOpen}
+            onClose={() => setIsQuotaModalOpen(false)}
+            onGoToBilling={() => setActiveTab("billing")}
+            message={quotaModalMessage}
+          />
         </main>
       </div>
     </div>

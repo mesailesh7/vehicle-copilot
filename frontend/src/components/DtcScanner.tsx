@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { ShieldAlert, Cpu, Sparkles, Plus, CheckCircle, HelpCircle, Activity, Thermometer, Gauge, AlertTriangle, FileText, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { Vehicle } from "../types";
+import { API_BASE_URL, getAuthHeaders } from "../utils/api";
 
 interface DtcScannerProps {
   vehicle: Vehicle;
@@ -73,9 +74,9 @@ export default function DtcScanner({ vehicle }: DtcScannerProps) {
 
     try {
       // 1. Submit DTC Scan
-      const scanRes = await fetch("http://localhost:8000/api/v1/inspections/dtc-scan/", {
+      const scanRes = await fetch(`${API_BASE_URL}/inspections/dtc-scan/`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           vehicle_id: vehicle.id,
           dtc_code: dtcCode.toUpperCase().trim(),
@@ -86,7 +87,7 @@ export default function DtcScanner({ vehicle }: DtcScannerProps) {
       });
 
       if (!scanRes.ok) {
-        const errData = await scanRes.json();
+        const errData = await scanRes.json().catch(() => ({ detail: "Failed to log DTC code." }));
         throw new Error(errData.detail || "Failed to log DTC code.");
       }
 
@@ -94,13 +95,14 @@ export default function DtcScanner({ vehicle }: DtcScannerProps) {
       setActiveScanId(scan.id);
 
       // 2. Query Copilot analysis
-      const analysisRes = await fetch(`http://localhost:8000/api/v1/inspections/dtc-scan/${scan.id}/analyze/`, {
+      const analysisRes = await fetch(`${API_BASE_URL}/inspections/dtc-scan/${scan.id}/analyze/`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
       });
 
       if (!analysisRes.ok) {
-        throw new Error("Failed to compile Master Tech diagnostics roadmap.");
+        const errData = await analysisRes.json().catch(() => ({ detail: "Failed to compile Master Tech diagnostics roadmap." }));
+        throw new Error(errData.detail || "Failed to compile Master Tech diagnostics roadmap.");
       }
 
       const analysis = await analysisRes.json();
@@ -118,9 +120,9 @@ export default function DtcScanner({ vehicle }: DtcScannerProps) {
 
     setResolveLoading(true);
     try {
-      const res = await fetch("http://localhost:8000/api/v1/inspections/resolve-and-learn/", {
+      const res = await fetch(`${API_BASE_URL}/inspections/resolve-and-learn/`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           scan_id: activeScanId,
           dtc_code: dtcCode.toUpperCase().trim(),
@@ -134,7 +136,8 @@ export default function DtcScanner({ vehicle }: DtcScannerProps) {
       });
 
       if (!res.ok) {
-        throw new Error("Failed to index fix report.");
+        const errData = await res.json().catch(() => ({ detail: "Failed to index fix report." }));
+        throw new Error(errData.detail || "Failed to index fix report.");
       }
 
       setResolveSuccess(true);

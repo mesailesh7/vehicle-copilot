@@ -3,13 +3,14 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 from qdrant_client.http import models as qmodels
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_qdrant import QdrantVectorStore
 from langchain_core.documents import Document
 
 from app.database import get_session
 from app.config import settings
+from app.models.user import User, UserRole
 from app.models.vehicle import Vehicle
 from app.models.inspection import (
     DTCScan,
@@ -17,6 +18,7 @@ from app.models.inspection import (
     ShopFix,
     ShopFixCreate,
 )
+from app.routers.auth import get_current_user
 from app.services.ingestion import qdrant_client, ensure_collection_exists, embeddings
 from app.services.copilot import fetch_manual_context
 
@@ -27,7 +29,7 @@ FIXES_COLLECTION = "shop_fixes"
 llm = ChatOpenAI(
     model="gpt-4o-mini",
     temperature=0.2,
-    openai_api_key=settings.openai_api_key,
+    openai_api_key=settings.openai_api_key or "sk-dummy-for-dev",
 )
 
 def get_fixes_vector_store() -> QdrantVectorStore:
@@ -52,18 +54,27 @@ def calculate_dtc_severity(dtc_code: str) -> str:
 @router.post("/dtc-scan/", response_model=DTCScan)
 def create_dtc_scan(
     scan_data: DTCScanCreate,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
+    if current_user.role == UserRole.SERVICE_ADVISOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Service Advisors cannot initiate OBD-II diagnostic scans.",
+        )
+
+    tenant_id = current_user.tenant_id or 1
     vehicle = session.get(Vehicle, scan_data.vehicle_id)
-    if not vehicle:
+    if not vehicle or vehicle.tenant_id != tenant_id:
         raise HTTPException(
             status_code=404,
-            detail="Vehicle not found"
+            detail="Vehicle not found in your workshop."
         )
     
     severity = calculate_dtc_severity(scan_data.dtc_code)
     scan = DTCScan(
         vehicle_id=scan_data.vehicle_id,
+        tenant_id=tenant_id,
         dtc_code=scan_data.dtc_code.upper().strip(),
         rpm=scan_data.rpm,
         coolant_temp=scan_data.coolant_temp,
@@ -79,46 +90,47 @@ def create_dtc_scan(
 @router.post("/dtc-scan/{scan_id}/analyze/")
 async def analyze_dtc_scan(
     scan_id: int,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
+    tenant_id = current_user.tenant_id or 1
     scan = session.get(DTCScan, scan_id)
-    if not scan:
+    if not scan or scan.tenant_id != tenant_id:
         raise HTTPException(
             status_code=404,
-            detail="DTC Scan record not found"
+            detail="DTC Scan record not found in your workshop."
         )
     
     vehicle = session.get(Vehicle, scan.vehicle_id)
-    if not vehicle:
+    if not vehicle or vehicle.tenant_id != tenant_id:
         raise HTTPException(
             status_code=404,
-            detail="Vehicle associated with scan not found"
+            detail="Vehicle associated with scan not found."
         )
     
-    # 1. Query manuals vector DB
-    manual_context = fetch_manual_context(vehicle_id=vehicle.id, query=scan.dtc_code)
+    # 1. Query manuals vector DB for this vehicle & tenant
+    manual_context = fetch_manual_context(vehicle_id=vehicle.id, tenant_id=tenant_id, query=scan.dtc_code)
     
     # 2. Query shop fixes vector DB for related past fixes
-    fixes_store = get_fixes_vector_store()
-    try:
-        fix_results = fixes_store.similarity_search(query=scan.dtc_code, k=3)
-    except Exception:
-        fix_results = []
-        
     fix_context_list = []
-    for i, doc in enumerate(fix_results, start=1):
-        fix_context_list.append(f"Past Fix [{i}]:\n{doc.page_content}")
-    
+    try:
+        fixes_store = get_fixes_vector_store()
+        fix_results = fixes_store.similarity_search(query=scan.dtc_code, k=3)
+        for i, doc in enumerate(fix_results, start=1):
+            fix_context_list.append(f"Past Fix [{i}]:\n{doc.page_content}")
+    except Exception:
+        pass
+        
     fix_context = "\n\n".join(fix_context_list) if fix_context_list else "No matching past shop fixes indexed."
 
     # 3. Construct system and user prompt
-    system_prompt = """You are an expert Automotive Master Technician.
-Your task is to analyze the active DTC trouble code and OBD-II freeze frame data.
+    system_prompt = """You are an expert Automotive Master Diagnostic Technician.
+Your task is to analyze the active DTC trouble code and OBD-II freeze frame sensor data.
 Provide:
-1. Diagnosis & description of what the DTC code means.
-2. Step-by-step diagnostic verification and pinpoint testing steps.
-3. Reference values based on manual excerpts or past shop fixes.
-Be precise, safety-conscious, and technical. Use markdown.
+1. Exact diagnosis & root causes for what the DTC code means.
+2. Step-by-step diagnostic pinpoint tests (voltmeter, smoke machine, bi-directional scan tests).
+3. Reference OEM values based on manual excerpts or confirmed historical shop fixes.
+Be concise, safety-conscious, and technical. Format with markdown headings and clear bullet points.
 """
     user_prompt = f"""--- VEHICLE PROFILE ---
 Make/Model/Year: {vehicle.year} {vehicle.make} {vehicle.model}
@@ -157,10 +169,13 @@ Please provide pinpoint diagnostic steps and confirmed checks.
 @router.post("/resolve-and-learn/", response_model=ShopFix)
 def resolve_and_learn_fix(
     fix_data: ShopFixCreate,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
+    tenant_id = current_user.tenant_id or 1
     # 1. Save ShopFix to SQLite
     fix = ShopFix(
+        tenant_id=tenant_id,
         dtc_code=fix_data.dtc_code.upper().strip(),
         make=fix_data.make,
         model=fix_data.model,
@@ -174,7 +189,7 @@ def resolve_and_learn_fix(
     # 2. Mark scan as resolved if scan_id is provided
     if fix_data.scan_id:
         scan = session.get(DTCScan, fix_data.scan_id)
-        if scan:
+        if scan and scan.tenant_id == tenant_id:
             scan.status = "resolved"
             session.add(scan)
             
@@ -194,6 +209,7 @@ def resolve_and_learn_fix(
         page_content=fix_text,
         metadata={
             "fix_id": fix.id,
+            "tenant_id": tenant_id,
             "dtc_code": fix.dtc_code,
             "make": fix.make,
             "model": fix.model,
@@ -205,7 +221,6 @@ def resolve_and_learn_fix(
         fixes_store = get_fixes_vector_store()
         fixes_store.add_documents([doc])
     except Exception as e:
-        # Don't fail the REST endpoint if vector DB upload has an error, but log it
         print(f"Failed to upsert fix to Qdrant collection: {e}")
         
     return fix
@@ -213,11 +228,18 @@ def resolve_and_learn_fix(
 @router.get("/knowledge-base/", response_model=List[ShopFix])
 def get_knowledge_base(
     q: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
+    tenant_id = current_user.tenant_id or 1
+    
+    # Base query: tenant-specific fixes OR platform global fixes (where tenant_id is NULL or 1)
+    base_filter = (ShopFix.tenant_id == tenant_id) | (ShopFix.tenant_id == None) | (ShopFix.tenant_id == 1)
+
     if not q:
-        # Return all fixes
-        return session.exec(select(ShopFix).order_by(ShopFix.created_at.desc())).all()
+        return session.exec(
+            select(ShopFix).where(base_filter).order_by(ShopFix.created_at.desc())
+        ).all()
     
     # Hybrid Search:
     # 1. SQL database matches
@@ -225,18 +247,20 @@ def get_knowledge_base(
     stmt = (
         select(ShopFix)
         .where(
-            (ShopFix.dtc_code.like(q_pattern)) |
-            (ShopFix.make.like(q_pattern)) |
-            (ShopFix.model.like(q_pattern)) |
-            (ShopFix.reported_symptom.like(q_pattern)) |
-            (ShopFix.root_cause.like(q_pattern)) |
-            (ShopFix.confirmed_fix.like(q_pattern))
+            base_filter,
+            (
+                (ShopFix.dtc_code.like(q_pattern)) |
+                (ShopFix.make.like(q_pattern)) |
+                (ShopFix.model.like(q_pattern)) |
+                (ShopFix.reported_symptom.like(q_pattern)) |
+                (ShopFix.root_cause.like(q_pattern)) |
+                (ShopFix.confirmed_fix.like(q_pattern))
+            )
         )
         .order_by(ShopFix.created_at.desc())
     )
     sql_matches = session.exec(stmt).all()
     
-    # Keep track of matched IDs
     matched_ids = {fix.id for fix in sql_matches if fix.id is not None}
     results = list(sql_matches)
     
@@ -247,9 +271,8 @@ def get_knowledge_base(
         for doc in vector_results:
             fix_id = doc.metadata.get("fix_id")
             if fix_id and fix_id not in matched_ids:
-                # Retrieve from SQL
                 fix_db = session.get(ShopFix, fix_id)
-                if fix_db:
+                if fix_db and (fix_db.tenant_id in [tenant_id, 1, None]):
                     results.append(fix_db)
                     matched_ids.add(fix_id)
     except Exception as e:

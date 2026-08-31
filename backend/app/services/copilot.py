@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from sqlmodel import Session, select
 from qdrant_client.http import models as qmodels
 from langchain_openai import ChatOpenAI
@@ -11,19 +11,19 @@ from app.services.ingestion import get_vector_store
 llm = ChatOpenAI(
     model="gpt-4o-mini",
     temperature=0.2,
-    openai_api_key=settings.openai_api_key,
+    openai_api_key=settings.openai_api_key or "sk-dummy-for-dev",
 )
 
-SYSTEM_PROMPT="""You are an expert Automotive Diagnostic and Maintenance Copilot.
-Your job is to assist vehicle owners using two sources of truth:
+SYSTEM_PROMPT = """You are an expert Automotive Diagnostic and Maintenance Copilot for modern auto repair workshops.
+Your job is to assist technicians, service advisors, and shop managers using two sources of truth:
 1. Structured Service Records & Vehicle Specs (from the SQL database)
-2. Technical Manual Excerpts (from vector retrieval)
+2. Technical Manual Excerpts & Fluid Specifications (from vector retrieval)
 
 Guidelines:
-- When asked about past maintenance, rely on the provided Service History.
-- When asked about torque specs, fluid capacities, oil weights, or fuse locations, cite the Owner's Manual context.
-- If the data is not in either source, clearly state that the specific information is not available in the records or manual.
-- Always provide clear, safety-conscious step-by-step guidance.
+- When asked about past maintenance or service timeline, cite the provided Structured Service History.
+- When asked about torque specs, fluid capacities, oil weights, fuse diagrams, or OBD-II diagnostics, cite the Owner's Manual excerpts.
+- If the data is not in either source, clearly state what information is missing and provide professional diagnostic guidance.
+- Always provide clear, safety-conscious step-by-step guidance. Use markdown formatting with bullet points and bold highlights.
 """
 
 USER_TEMPLATE = """--- VEHICLE PROFILE ---
@@ -40,13 +40,15 @@ Current Mileage: {current_mileage} miles
 --- USER QUESTION ---
 {question}
 """
-def fetch_vehicle_context(vehicle_id: int, session: Session) -> Dict[str, Any]:
+
+def fetch_vehicle_context(vehicle_id: int, tenant_id: int, session: Session) -> Dict[str, Any]:
     vehicle = session.get(Vehicle, vehicle_id)
-    if not vehicle:
-        raise ValueError(f"Vehicle with id {vehicle_id} not found")
+    if not vehicle or vehicle.tenant_id != tenant_id:
+        raise ValueError(f"Vehicle with id {vehicle_id} not found in this workshop.")
+    
     statement = (
         select(ServiceLog)
-        .where(ServiceLog.vehicle_id == vehicle_id)
+        .where(ServiceLog.vehicle_id == vehicle_id, ServiceLog.tenant_id == tenant_id)
         .order_by(ServiceLog.service_date.desc())
     )
     logs = session.exec(statement).all()
@@ -69,42 +71,44 @@ def fetch_vehicle_context(vehicle_id: int, session: Session) -> Dict[str, Any]:
         "service_history": history_text
     }
 
-def fetch_manual_context(vehicle_id: int, query: str, top_k:int =4)  -> str:
-    vector_store = get_vector_store()
+def fetch_manual_context(vehicle_id: int, tenant_id: int, query: str, top_k: int = 4) -> str:
+    try:
+        vector_store = get_vector_store()
 
-    vehicle_filter = qmodels.Filter(
-        must = [
-            qmodels.FieldCondition(
-                key="metadata.vehicle_id",
-                match=qmodels.MatchValue(value=vehicle_id),
-            )
-        ]
-    )
+        vehicle_filter = qmodels.Filter(
+            must=[
+                qmodels.FieldCondition(
+                    key="metadata.vehicle_id",
+                    match=qmodels.MatchValue(value=vehicle_id),
+                )
+            ]
+        )
 
-    results = vector_store.similarity_search(
-        query=query,
-        k=top_k,
-        filter=vehicle_filter,
-    )
+        results = vector_store.similarity_search(
+            query=query,
+            k=top_k,
+            filter=vehicle_filter,
+        )
 
-    if not results:
-        return "NO relevant owner's manual excerpts located."
+        if not results:
+            return "No relevant owner's manual excerpts located in vector storage."
 
-    formatted_docs = []
-    for i, doc in enumerate(results, start=1):
-        source = doc.metadata.get("source_filename", "Manual")
-        page = doc.metadata.get("page", "N/A")
-        formatted_docs.append(f"Excerpt [{i}] (Source: {source}, Page: {page}):\n{doc.page_content}")
+        formatted_docs = []
+        for i, doc in enumerate(results, start=1):
+            source = doc.metadata.get("source_filename", "Manual")
+            page = doc.metadata.get("page", "N/A")
+            formatted_docs.append(f"Excerpt [{i}] (Source: {source}, Page: {page}):\n{doc.page_content}")
 
-    return "\n\n".join(formatted_docs)
+        return "\n\n".join(formatted_docs)
+    except Exception as e:
+        return f"Manual vector context unavailable ({e})."
 
-
-async def generate_copilot_response(vehicle_id: int, question: str,session: Session) -> str:
-    veh_data = fetch_vehicle_context(vehicle_id, session)
+async def generate_copilot_response(vehicle_id: int, tenant_id: int, question: str, session: Session) -> str:
+    veh_data = fetch_vehicle_context(vehicle_id, tenant_id, session)
     vehicle: Vehicle = veh_data["vehicle"]
     service_history: str = veh_data["service_history"]
 
-    manual_context = fetch_manual_context(vehicle_id=vehicle_id, query=question)
+    manual_context = fetch_manual_context(vehicle_id=vehicle_id, tenant_id=tenant_id, query=question)
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM_PROMPT),

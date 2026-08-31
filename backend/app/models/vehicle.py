@@ -29,6 +29,7 @@ class Vehicle(VehicleBase, table=True):
     __tablename__ = "vehicles"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: int = Field(default=1, foreign_key="tenants.id", index=True)
 
 class VehicleCreate(VehicleBase):
     pass
@@ -48,6 +49,7 @@ class ServiceLog(ServiceLogBase, table=True):
     __tablename__ = "service_logs"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: Optional[int] = Field(default=1, foreign_key="tenants.id", index=True)
 
 class ServiceLogCreate(ServiceLogBase):
     service_date: Optional[date] = None

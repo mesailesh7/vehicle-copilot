@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Search, Tag, BookOpen, AlertTriangle, User, FileText, CheckCircle, Clock, Plus, HelpCircle, X } from "lucide-react";
 import { Vehicle } from "../types";
+import { API_BASE_URL, getAuthHeaders } from "../utils/api";
 
 interface FixItem {
   id: number;
@@ -51,10 +52,12 @@ export default function KnowledgeBase() {
     setError("");
     try {
       const url = query
-        ? `http://localhost:8000/api/v1/inspections/knowledge-base/?q=${encodeURIComponent(query)}`
-        : "http://localhost:8000/api/v1/inspections/knowledge-base/";
+        ? `${API_BASE_URL}/inspections/knowledge-base/?q=${encodeURIComponent(query)}`
+        : `${API_BASE_URL}/inspections/knowledge-base/`;
       
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: getAuthHeaders(),
+      });
       if (!response.ok) {
         throw new Error("Failed to fetch past repairs feed.");
       }
@@ -73,9 +76,9 @@ export default function KnowledgeBase() {
 
     setAddLoading(true);
     try {
-      const res = await fetch("http://localhost:8000/api/v1/inspections/resolve-and-learn/", {
+      const res = await fetch(`${API_BASE_URL}/inspections/resolve-and-learn/`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           dtc_code: dtcCode.toUpperCase().trim(),
           make: make.trim(),

@@ -16,6 +16,7 @@ class DTCScan(DTCScanBase, table=True):
     __tablename__ = "dtc_scans"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: Optional[int] = Field(default=None, foreign_key="tenants.id", index=True)
     severity: str  # Critical Engine Fault, Emissions Warning, Body/Chassis
     status: str = "pending"  # pending, resolved
     created_at: datetime = Field(default_factory=_utc_now)
@@ -36,6 +37,7 @@ class ShopFix(ShopFixBase, table=True):
     __tablename__ = "shop_fixes"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: Optional[int] = Field(default=None, foreign_key="tenants.id", index=True)
     created_at: datetime = Field(default_factory=_utc_now)
 
 class ShopFixCreate(ShopFixBase):
